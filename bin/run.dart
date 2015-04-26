@@ -191,8 +191,8 @@ tickValueUpdates() async {
       DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
       DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
       node.getChild("Mode").updateValue(mode);
-      node.getChild("Brew_Completed").updateValue(lastBrewed.toString());
-      node.getChild("Brew_Started").updateValue(lastBrewStarted.toString());
+      node.getChild("Brew_Completed").updateValue(brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
+      node.getChild("Brew_Started").updateValue(brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
       node.getChild("Brew_Duration").updateValue(lastBrewed.difference(lastBrewStarted).inSeconds);
       var age = 0;
       if (brewTimestamp != 0) {
