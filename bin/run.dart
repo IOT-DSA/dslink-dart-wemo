@@ -194,7 +194,7 @@ tickValueUpdates() async {
       node.getChild("Brew_Completed").updateValue(lastBrewed.toString());
       node.getChild("Brew_Started").updateValue(lastBrewStarted.toString());
       node.getChild("Brew_Duration").updateValue(lastBrewed.difference(lastBrewStarted).inSeconds);
-      node.getChild("Brew_Age").updateValue(new DateTime.now().difference(lastBrewed).inSeconds);
+      node.getChild("Brew_Age").updateValue(lastBrewed.difference(new DateTime.now()).inSeconds);
     }
   }
 }
