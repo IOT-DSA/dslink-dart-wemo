@@ -184,6 +184,10 @@ tickValueUpdates() async {
       var mode = CoffeeMakerHelper.getModeString(attrs["Mode"]);
       var brewTimestamp = attrs["Brewed"];
       var brewingTimestamp = attrs["Brewing"];
+
+      if (brewingTimestamp == null) brewingTimestamp = 0;
+      if (brewTimestamp == null) brewTimestamp = 0;
+
       DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
       DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
       node.getChild("Mode").updateValue(mode);
