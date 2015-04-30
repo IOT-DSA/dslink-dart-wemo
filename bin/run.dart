@@ -11,8 +11,6 @@ SimpleNode devicesNode;
 
 main(List<String> args) async {
   link = new LinkProvider(args, "WeMo", isResponder: true, command: "run", defaultNodes: {
-    "Devices": {
-    }
   }, profiles: {
     "getBinaryState": (String path) => new GetBinaryStateNode(path),
     "setBinaryState": (String path) => new SetBinaryStateNode(path),
@@ -22,7 +20,7 @@ main(List<String> args) async {
 
   if (link.link == null) return;
 
-  devicesNode = link.provider.getNode("/Devices");
+  devicesNode = link.provider.getNode("/");
 
   new Timer.periodic(valueUpdateTickRate, (timer) async {
     await tickValueUpdates();
@@ -57,7 +55,7 @@ updateDevices() async {
   }
 
   for (Device device in devices) {
-    if (link.provider.nodes.containsKey("/Devices/${device.uuid}")) {
+    if (link.provider.nodes.containsKey("/${device.uuid}")) {
       continue;
     }
 
@@ -75,8 +73,8 @@ updateDevices() async {
 
     var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
     var deviceEventService = await device.getService("urn:Belkin:service:deviceevent:1");
-    basicEventServices["/Devices/${device.uuid}"] = basicEventService;
-    deviceEventServices["/Devices/${device.uuid}"] = deviceEventService;
+    basicEventServices["/${device.uuid}"] = basicEventService;
+    deviceEventServices["/${device.uuid}"] = deviceEventService;
 
     m["BinaryState"] = {
       r"$type": "int",
@@ -163,7 +161,7 @@ updateDevices() async {
     } else {
       m[r"$isCoffeeMaker"] = false;
     }
-    link.provider.addNode("/Devices/${device.uuid}", m);
+    link.provider.addNode("/${device.uuid}", m);
   }
 }
 
