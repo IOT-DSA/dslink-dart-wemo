@@ -1,7 +1,6 @@
 import "dart:async";
 
-import "package:dslink/client.dart";
-import "package:dslink/responder.dart";
+import "package:dslink/dslink.dart";
 
 import "package:upnp/upnp.dart";
 
@@ -17,8 +16,6 @@ main(List<String> args) async {
     "toggleBinaryState": (String path) => new ToggleBinaryStateNode(path),
     "brewCoffee": (String path) => new BrewCoffeeNode(path)
   });
-
-  if (link.link == null) return;
 
   devicesNode = link.provider.getNode("/");
 
@@ -55,7 +52,7 @@ updateDevices() async {
   }
 
   for (Device device in devices) {
-    if (link.provider.nodes.containsKey("/${device.uuid}")) {
+    if ((link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}")) {
       continue;
     }
 
@@ -161,7 +158,7 @@ updateDevices() async {
     } else {
       m[r"$isCoffeeMaker"] = false;
     }
-    link.provider.addNode("/${device.uuid}", m);
+    link.addNode("/${device.uuid}", m);
   }
 }
 
