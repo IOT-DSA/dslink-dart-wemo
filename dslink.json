@@ -1,5 +1,5 @@
 {
-  "name": "wemo",
+  "name": "dslink-dart-wemo",
   "version": "1.0.0",
   "description": "WeMo DSLink",
   "main": "bin/run.dart",
