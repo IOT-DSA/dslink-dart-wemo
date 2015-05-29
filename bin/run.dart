@@ -124,7 +124,8 @@ updateDevices() async {
         "?value": "Unknown"
       };
 
-      m["Brew Coffee"] = {
+      m["Brew_Coffee"] = {
+        r"$name": "Brew Coffee",
         r"$is": "brewCoffee",
         r"$invokable": "write",
         r"$columns": {},
