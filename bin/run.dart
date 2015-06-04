@@ -9,7 +9,7 @@ LinkProvider link;
 SimpleNode devicesNode;
 
 main(List<String> args) async {
-  link = new LinkProvider(args, "WeMo", isResponder: true, command: "run", defaultNodes: {
+  link = new LinkProvider(args, "WeMo-", isResponder: true, command: "run", defaultNodes: {
   }, profiles: {
     "getBinaryState": (String path) => new GetBinaryStateNode(path),
     "setBinaryState": (String path) => new SetBinaryStateNode(path),
