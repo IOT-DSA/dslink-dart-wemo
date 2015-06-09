@@ -17,7 +17,9 @@ main(List<String> args) async {
     "brewCoffee": (String path) => new BrewCoffeeNode(path)
   });
 
-  devicesNode = link.provider.getNode("/");
+  devicesNode = link["/"];
+
+  await updateDevices();
 
   new Timer.periodic(valueUpdateTickRate, (timer) async {
     await tickValueUpdates();
@@ -27,7 +29,6 @@ main(List<String> args) async {
     await tickDeviceDiscovery();
   });
 
-  await updateDevices();
   link.connect();
 }
 
@@ -57,21 +58,26 @@ updateDevices() async {
     }
 
     print("Discovered Device: ${device.friendlyName}");
+
     var m = {
       r"$name": device.friendlyName,
       r"$uuid": device.uuid
     };
 
     if (device.icons != null && device.icons.isNotEmpty) {
-      print(device.icons);
       var icon = device.icons.first;
-      m[r"$icon"] = icon.url;
+      m[r"@icon"] = icon.url;
     }
 
     var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
-    var deviceEventService = await device.getService("urn:Belkin:service:deviceevent:1");
+
+    try {
+      var deviceEventService = await device.getService("urn:Belkin:service:deviceevent:1");
+      deviceEventServices["/${device.uuid}"] = deviceEventService;
+    } catch (e) {
+    }
+
     basicEventServices["/${device.uuid}"] = basicEventService;
-    deviceEventServices["/${device.uuid}"] = deviceEventService;
 
     m["BinaryState"] = {
       r"$type": "int",
@@ -221,7 +227,7 @@ class GetBinaryStateNode extends SimpleNode {
   @override
   onInvoke(Map params) {
     new Future(() async {
-      var p = path.split("/").take(3).join("/");
+      var p = path.split("/").take(2).join("/");
       var result;
       try {
         result = await basicEventServices[p].invokeAction("GetBinaryState", {});
@@ -241,7 +247,7 @@ class ToggleBinaryStateNode extends SimpleNode {
 
   @override
   onInvoke(Map params) {
-    var p = path.split("/").take(3).join("/");
+    var p = path.split("/").take(2).join("/");
     var service = basicEventServices[p];
     service.invokeAction("GetBinaryState", {}).then((result) {
       var state = int.parse(result["BinaryState"]);
@@ -259,7 +265,7 @@ class BrewCoffeeNode extends SimpleNode {
 
   @override
   onInvoke(Map params) {
-    var p = path.split("/").take(3).join("/");
+    var p = path.split("/").take(2).join("/");
     var service = deviceEventServices[p];
     service.invokeAction("SetAttributes", {
       "attributeList": CoffeeMakerHelper.createSetModeAttributes(4)
@@ -282,7 +288,7 @@ class SetBinaryStateNode extends SimpleNode {
       return {};
     }
 
-    var p = path.split("/").take(3).join("/");
+    var p = path.split("/").take(2).join("/");
     basicEventServices[p].invokeAction("SetBinaryState", {
       "BinaryState": params["state"]
     }).catchError((e) {
