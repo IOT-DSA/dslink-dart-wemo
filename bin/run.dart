@@ -222,7 +222,7 @@ tickValueUpdates() async {
 }
 
 class GetBinaryStateNode extends SimpleNode {
-  GetBinaryStateNode(String path) : super(path);
+  GetBinaryStateNode(String path) : super(path, link.provider);
 
   @override
   onInvoke(Map params) {
@@ -243,7 +243,7 @@ class GetBinaryStateNode extends SimpleNode {
 }
 
 class ToggleBinaryStateNode extends SimpleNode {
-  ToggleBinaryStateNode(String path) : super(path);
+  ToggleBinaryStateNode(String path) : super(path, link.provider);
 
   @override
   onInvoke(Map params) {
@@ -261,7 +261,7 @@ class ToggleBinaryStateNode extends SimpleNode {
 }
 
 class BrewCoffeeNode extends SimpleNode {
-  BrewCoffeeNode(String path) : super(path);
+  BrewCoffeeNode(String path) : super(path, link.provider);
 
   @override
   onInvoke(Map params) {
@@ -276,7 +276,7 @@ class BrewCoffeeNode extends SimpleNode {
 }
 
 class SetBinaryStateNode extends SimpleNode {
-  SetBinaryStateNode(String path) : super(path);
+  SetBinaryStateNode(String path) : super(path, link.provider);
 
   @override
   onInvoke(Map params) {
