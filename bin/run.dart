@@ -231,7 +231,7 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
   var m = {
     r"$name": device.friendlyName,
     r"$uuid": device.uuid,
-    r"$location": device.url
+    r"$location": Uri.parse(device.urlBase).resolve(device.url)
   };
 
   var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
@@ -249,6 +249,11 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
   }
 
   basicEventServices["/${device.uuid}"] = basicEventService;
+
+  m["Friendly_Name"] = {
+    r"$name": "Friendly Name",
+    r"$type": "string"
+  };
 
   if (manual) {
     m["Remove"] = {
@@ -432,8 +437,11 @@ tickValueUpdates() async {
     } catch (e) {
       continue;
     }
+
+    var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
     var state = int.parse(result["BinaryState"]);
 
+    link.val("${path}/Friendly_Name", friendlyName);
     link.val("${path}/BinaryState", state);
 
     var deviceEventService = deviceEventServices[path];
@@ -546,6 +554,17 @@ class ToggleBinaryStateNode extends SimpleNode {
       return service.invokeAction("SetBinaryState", {
         "BinaryState": state == 0 ? 1 : 0
       });
+    }).then((l) {
+      var state = l["BinaryState"];
+      if (state != "Error") {
+        try {
+          state = int.parse(state);
+        } catch (e) {}
+      }
+      if (state is! int) {
+        return null;
+      }
+      link.val("${p}/BinaryState", state);
     }).catchError((e) {
     });
     return {};
@@ -584,7 +603,17 @@ class SetBinaryStateNode extends SimpleNode {
     var service = basicEventServices[p];
     return service.invokeAction("SetBinaryState", {
       "BinaryState": state
-    }).then((_) {
+    }).then((l) {
+      var state = l["BinaryState"];
+      if (state != "Error") {
+        try {
+          state = int.parse(state);
+        } catch (e) {}
+      }
+      if (state is! int) {
+        return null;
+      }
+      link.val("${p}/BinaryState", state);
       return {};
     }).catchError((e) {
     });
