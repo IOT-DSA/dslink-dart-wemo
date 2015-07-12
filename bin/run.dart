@@ -167,11 +167,15 @@ main(List<String> args) async {
       continue;
     }
 
-    var dm = new DiscoveredClient();
-    dm.location = nr.configs[r"$location"];
+    try {
+      var dm = new DiscoveredClient();
+      dm.location = nr.configs[r"$location"];
 
-    var device = await dm.getDevice();
-    addDevice(device, true, true);
+      var device = await dm.getDevice();
+      await addDevice(device, true, true);
+    } catch (e) {
+      print("Failed to load device: ${n}");
+    }
   }
 
   await updateDevices();
@@ -192,9 +196,8 @@ updateDevices() async {
   List<Device> devices;
 
   try {
-    devices = await discoverer.getDevices(type: CommonDevices.WEMO).timeout(new Duration(seconds: 15), onTimeout: () {
-      return [];
-    });
+    devices = await discoverer.getDevices(timeout: const Duration(seconds: 5));
+    devices = devices.where((x) => x.services.any((s) => s.type == "urn:Belkin:service:basicevent:1")).toList();
   } catch (e) {
     return;
   }
@@ -211,7 +214,7 @@ updateDevices() async {
   for (Device device in devices) {
     if (
       (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
-      link["/${device.uuid}"].children.containsKey("BinaryState")) {
+      link["/${device.uuid}"].configs.containsKey(r"$location")) {
       continue;
     }
 
@@ -224,11 +227,11 @@ updateDevices() async {
 addDevice(Device device, [bool manual = false, bool force = false]) async {
   if (
     (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
-    link["/${device.uuid}"].children.containsKey("BinaryState") && !force) {
+    link["/${device.uuid}"].configs.containsKey(r"$location") && !force) {
     throw "Device already added.";
   }
 
-  var uri = Uri.parse(device.urlBase).resolve(device.url).toString();
+  var uri = device.url;
 
   var m = {
     r"$name": device.friendlyName,
@@ -278,7 +281,7 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
 
   m["Manufacturer"] = {
     r"$type": "string",
-    r"?value": device.manufacturer,
+    r"?value": device.manufacturer
   };
 
   m["BinaryState"]["Get"] = {
