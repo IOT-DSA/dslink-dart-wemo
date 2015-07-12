@@ -119,11 +119,6 @@ updateDevices() async {
       r"$uuid": device.uuid
     };
 
-    if (device.icons != null && device.icons.isNotEmpty) {
-      var icon = device.icons.first;
-      m[r"@icon"] = icon.url;
-    }
-
     var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
 
     try {
