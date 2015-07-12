@@ -217,7 +217,7 @@ updateDevices() async {
 
     print("Discovered Device: ${device.friendlyName}");
 
-    await addDevice(device, true);
+    await addDevice(device);
   }
 }
 
