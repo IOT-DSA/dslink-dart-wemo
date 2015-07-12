@@ -37,7 +37,7 @@ main(List<String> args) async {
 
         var device = await dm.getDevice();
 
-        await addDevice(device, true);
+        await addDevice(device, true, true);
         await link.saveAsync();
       } catch (e) {
         return {
@@ -228,10 +228,12 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
     throw "Device already added.";
   }
 
+  var uri = Uri.parse(device.urlBase).resolve(device.url).toString();
+
   var m = {
     r"$name": device.friendlyName,
     r"$uuid": device.uuid,
-    r"$location": Uri.parse(device.urlBase).resolve(device.url)
+    r"$location": uri
   };
 
   var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
