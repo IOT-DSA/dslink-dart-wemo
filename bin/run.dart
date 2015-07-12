@@ -10,27 +10,82 @@ SimpleNode devicesNode;
 
 main(List<String> args) async {
   link = new LinkProvider(args, "WeMo-", isResponder: true, command: "run", defaultNodes: {
+    "Value_Tick_Rate": {
+      r"$name": "Value Tick Rate",
+      r"$type": "number",
+      r"$unit": "seconds",
+      r"$writable": "write",
+      "?value": 2
+    },
+    "Discovery_Tick_Rate": {
+      r"$name": "Discovery Tick Rate",
+      r"$type": "number",
+      r"$unit": "seconds",
+      r"$writable": "write",
+      "?value": 20
+    }
   }, profiles: {
     "getBinaryState": (String path) => new GetBinaryStateNode(path),
     "setBinaryState": (String path) => new SetBinaryStateNode(path),
     "toggleBinaryState": (String path) => new ToggleBinaryStateNode(path),
     "brewCoffee": (String path) => new BrewCoffeeNode(path)
-  });
+  }, autoInitialize: false);
+
+  link.init();
 
   devicesNode = link["/"];
 
+  link.onValueChange("/Value_Tick_Rate").listen((ValueUpdate update) async {
+    var value = update.value;
+
+    if (value is String) {
+      value = int.parse(value);
+    }
+
+    valueUpdateTickRate = new Duration(seconds: value);
+
+    if (valueUpdateTimer != null) {
+      valueUpdateTimer.cancel();
+      valueUpdateTimer = null;
+    }
+
+    valueUpdateTimer = new Timer.periodic(valueUpdateTickRate, (timer) async {
+      await tickValueUpdates();
+    });
+
+    await link.saveAsync();
+  });
+
+  link.onValueChange("/Discovery_Tick_Rate").listen((ValueUpdate update) async {
+    var value = update.value;
+
+    if (value is String) {
+      value = int.parse(value);
+    }
+
+    deviceDiscoveryTickRate = new Duration(seconds: value);
+
+    if (discoveryTimer != null) {
+      discoveryTimer.cancel();
+      discoveryTimer = null;
+    }
+
+    discoveryTimer = new Timer.periodic(deviceDiscoveryTickRate, (timer) async {
+      await tickDeviceDiscovery();
+    });
+
+    await link.saveAsync();
+  });
+
   await updateDevices();
 
-  new Timer.periodic(valueUpdateTickRate, (timer) async {
-    await tickValueUpdates();
-  });
-
-  new Timer.periodic(deviceDiscoveryTickRate, (timer) async {
-    await tickDeviceDiscovery();
-  });
-
+  link.syncValue("/Value_Tick_Rate");
+  link.syncValue("/Discovery_Tick_Rate");
   link.connect();
 }
+
+Timer valueUpdateTimer;
+Timer discoveryTimer;
 
 updateDevices() async {
   List<Device> devices;
@@ -98,7 +153,13 @@ updateDevices() async {
     m["BinaryState"]["Get"] = {
       r"$is": "getBinaryState",
       r"$invokable": "read",
-      r"$result": "values"
+      r"$result": "values",
+      r"$columns": [
+        {
+          "name": "state",
+          "type": "int"
+        }
+      ]
     };
 
     m["BinaryState"]["Set"] = {
@@ -166,11 +227,13 @@ updateDevices() async {
       m[r"$isCoffeeMaker"] = false;
     }
     link.addNode("/${device.uuid}", m);
+    SimpleNode n = link["/${device.uuid}"];
+    n.serializable = false;
   }
 }
 
-Duration deviceDiscoveryTickRate = new Duration(seconds: 20);
-Duration valueUpdateTickRate = new Duration(seconds: 3);
+Duration deviceDiscoveryTickRate;
+Duration valueUpdateTickRate;
 
 tickDeviceDiscovery() async {
   await updateDevices();
@@ -178,7 +241,7 @@ tickDeviceDiscovery() async {
 
 tickValueUpdates() async {
   for (var path in basicEventServices.keys) {
-    var node = link.provider.getNode(path);
+    var node = link[path];
     var service = basicEventServices[path];
     var result;
     try  {
@@ -191,7 +254,7 @@ tickValueUpdates() async {
 
     var deviceEventService = deviceEventServices[path];
 
-    if (node.getConfig(r"$isCoffeeMaker")) {
+    if (node.getConfig(r"$isCoffeeMaker") == true) {
       var mr;
       try {
         mr = await deviceEventService.invokeAction("GetAttributes", {});
@@ -225,20 +288,20 @@ class GetBinaryStateNode extends SimpleNode {
   GetBinaryStateNode(String path) : super(path, link.provider);
 
   @override
-  onInvoke(Map params) {
-    new Future(() async {
-      var p = path.split("/").take(2).join("/");
-      var result;
-      try {
-        result = await basicEventServices[p].invokeAction("GetBinaryState", {});
-      } catch (e) {
-        return;
-      }
-      var state = int.parse(result["BinaryState"]);
-      (link.provider.getNode(p).getChild("BinaryState") as SimpleNode).updateValue(state);
-    });
+  onInvoke(Map params) async {
+    var p = path.split("/").take(2).join("/");
+    var result;
+    try {
+      result = await basicEventServices[p].invokeAction("GetBinaryState", {});
+    } catch (e) {
+      return;
+    }
+    var state = int.parse(result["BinaryState"]);
+    link.val("${p}/BinaryState", state);
 
-    return {};
+    return {
+      "state": state
+    };
   }
 }
 
@@ -279,22 +342,23 @@ class SetBinaryStateNode extends SimpleNode {
   SetBinaryStateNode(String path) : super(path, link.provider);
 
   @override
-  onInvoke(Map params) {
-    if (!params.containsKey("state")) {
+  onInvoke(Map params) async {
+    if (params["state"] == null) {
       return {};
     }
 
-    if (params["state"] == null || params["state"] is! int) {
-      return {};
-    }
+    var state = params["state"] is String ? int.parse(params["state"]) : params["state"];
+
+    state = state.toInt();
 
     var p = path.split("/").take(2).join("/");
-    basicEventServices[p].invokeAction("SetBinaryState", {
-      "BinaryState": params["state"]
+    var service = basicEventServices[p];
+    return service.invokeAction("SetBinaryState", {
+      "BinaryState": state
+    }).then((_) {
+      return {};
     }).catchError((e) {
     });
-
-    return {};
   }
 }
 
