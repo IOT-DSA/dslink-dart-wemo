@@ -56,10 +56,6 @@ main(List<String> args) async {
 
   link.init();
 
-  link.onValueChange("/Auto_Discovery").listen((_) async {
-    await link.saveAsync();
-  });
-
   var m = {
     "Auto_Discovery": {
       r"$name": "Auto Discovery",
@@ -72,7 +68,7 @@ main(List<String> args) async {
       r"$type": "number",
       r"$unit": "seconds",
       r"$writable": "write",
-      "?value": 2
+      "?value": 1
     },
     "Discovery_Tick_Rate": {
       r"$name": "Discovery Tick Rate",
@@ -111,12 +107,16 @@ main(List<String> args) async {
   };
 
   for (var n in m.keys) {
-    if (!link.provider.nodes.containsKey("/${n}")) {
+    if (!(link.provider as NodeProviderImpl).nodes.containsKey("/${n}")) {
       link.addNode("/${n}", m[n]);
     }
   }
 
   devicesNode = link["/"];
+
+  link.onValueChange("/Auto_Discovery").listen((_) async {
+    await link.saveAsync();
+  });
 
   link.onValueChange("/Value_Tick_Rate").listen((ValueUpdate update) async {
     var value = update.value;
@@ -160,6 +160,20 @@ main(List<String> args) async {
     await link.saveAsync();
   });
 
+  for (var n in link["/"].children.keys) {
+    SimpleNode nr = link["/${n}"];
+
+    if (!nr.children.containsKey("BinaryState")) {
+      continue;
+    }
+
+    var dm = new DiscoveredClient();
+    dm.location = nr.configs[r"$location"];
+
+    var device = await dm.getDevice();
+    addDevice(device, true, true);
+  }
+
   await updateDevices();
 
   link.syncValue("/Value_Tick_Rate");
@@ -171,7 +185,7 @@ Timer valueUpdateTimer;
 Timer discoveryTimer;
 
 updateDevices() async {
-  if (link.val("/Auto_Discovery_Enabled") != true) {
+  if (link.val("/Auto_Discovery") != true) {
     return;
   }
 
@@ -207,16 +221,17 @@ updateDevices() async {
   }
 }
 
-addDevice(Device device, [bool manual = false]) async {
+addDevice(Device device, [bool manual = false, bool force = false]) async {
   if (
     (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
-    link["/${device.uuid}"].children.containsKey("BinaryState")) {
+    link["/${device.uuid}"].children.containsKey("BinaryState") && !force) {
     throw "Device already added.";
   }
 
   var m = {
     r"$name": device.friendlyName,
-    r"$uuid": device.uuid
+    r"$uuid": device.uuid,
+    r"$location": device.url
   };
 
   var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
@@ -224,6 +239,12 @@ addDevice(Device device, [bool manual = false]) async {
   try {
     var deviceEventService = await device.getService("urn:Belkin:service:deviceevent:1");
     deviceEventServices["/${device.uuid}"] = deviceEventService;
+  } catch (e) {
+  }
+
+  try {
+    var insightDeviceService = await device.getService("urn:Belkin:service:insight:1");
+    insightServices["/${device.uuid}"] = insightDeviceService;
   } catch (e) {
   }
 
@@ -286,6 +307,61 @@ addDevice(Device device, [bool manual = false]) async {
     r"$columns": {}
   };
 
+  if (device.modelName == "Insight") {
+    m[r"$isInsightSwitch"] = true;
+
+    m["State"] = {
+      r"$type": "enum[On,Off,Standby]",
+      "?value": "Unknown"
+    };
+
+    m["Last_State_Change"] = {
+      r"$name": "Last State Change",
+      r"$type": "string"
+    };
+
+    m["Current_Power"] = {
+      r"$name": "Current Power",
+      r"$type": "number",
+      r"$unit": "milliwatts"
+    };
+
+    m["On_For_Time"] = {
+      r"$name": "On For",
+      r"$type": "number",
+      r"$unit": "seconds",
+      r"$precision": 0
+    };
+
+    m["On_For_Today"] = {
+      r"$name": "On Today",
+      r"$type": "number",
+      r"$unit": "seconds",
+      r"$precision": 0
+    };
+
+    m["On_For_Total"] = {
+      r"$name": "On Total",
+      r"$type": "number",
+      r"$unit": "seconds",
+      r"$precision": 0
+    };
+
+    m["Today_Power"] = {
+      r"$name": "Power for Today",
+      r"$type": "number",
+      r"$unit": "milliwatts"
+    };
+
+    m["Total_Power"] = {
+      r"$name": "Power Total",
+      r"$type": "number",
+      r"$unit": "milliwatts"
+    };
+  } else {
+    m[r"$isInsightSwitch"] = false;
+  }
+
   if (device.modelName == "CoffeeMaker") {
     m[r"$isCoffeeMaker"] = true;
 
@@ -343,7 +419,12 @@ tickDeviceDiscovery() async {
 
 tickValueUpdates() async {
   for (var path in basicEventServices.keys) {
-    var node = link[path];
+    SimpleNode node = link[path];
+
+    if (!node.children.values.any((SimpleNode x) => x.hasSubscriber) && !(link.val("${path}/BinaryState") == null)) {
+      return;
+    }
+
     var service = basicEventServices[path];
     var result;
     try  {
@@ -352,7 +433,8 @@ tickValueUpdates() async {
       continue;
     }
     var state = int.parse(result["BinaryState"]);
-    node.getChild("BinaryState").updateValue(state);
+
+    link.val("${path}/BinaryState", state);
 
     var deviceEventService = deviceEventServices[path];
 
@@ -373,17 +455,62 @@ tickValueUpdates() async {
 
       DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
       DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
-      node.getChild("Mode").updateValue(mode);
-      node.getChild("Brew_Completed").updateValue(brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
-      node.getChild("Brew_Started").updateValue(brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
-      node.getChild("Brew_Duration").updateValue(lastBrewed.difference(lastBrewStarted).inSeconds);
+      link.val("${path}/Mode", mode);
+      link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
+      link.val("${path}/Brew_Started", brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
+      link.val("${path}/Brew_Duration", lastBrewed.difference(lastBrewStarted).inSeconds);
       var age = 0;
       if (brewTimestamp != 0) {
         age = lastBrewed.difference(new DateTime.now()).inSeconds;
       }
-      node.getChild("Brew_Age").updateValue(age);
+      link.val("${path}/Brew_Age", age);
+    } else if (node.getConfig(r"$isInsightSwitch") == true) {
+      var insight = insightServices[path];
+      if (insight == null) {
+        continue;
+      }
+
+      try {
+        var data = await fetchInsightData(insight);
+        link.val("${path}/State", data["state"]);
+        link.val("${path}/Last_State_Change", data["lastChange"]);
+        link.val("${path}/Current_Power", data["power"]);
+        link.val("${path}/On_For_Time", data["onForTime"]);
+        link.val("${path}/On_For_Today", data["onForToday"]);
+        link.val("${path}/On_For_Total", data["onForTotal"]);
+        link.val("${path}/Today_Power", data["powerToday"]);
+        link.val("${path}/Total_Power", data["powerTotal"]);
+      } catch (e) {}
     }
   }
+}
+
+Future<Map<String, dynamic>> fetchInsightData(Service service) async {
+  var result = await service.invokeAction("GetInsightParams", {});
+  var p = result["InsightParams"];
+  var c = p.split("|");
+  var state = {
+    "0": "Off",
+    "1": "On",
+    "8": "Standby"
+  }[c[0]];
+
+  var lastChange = new DateTime.fromMillisecondsSinceEpoch(num.parse(c[1]).toInt() * 1000);
+  var lastOnSeconds = int.parse(c[2]);
+  var onTodaySeconds = int.parse(c[3]);
+  var onForTotalSeconds = int.parse(c[4]);
+  var currentMilliWatts = int.parse(c[7]);
+
+  return {
+    "state": state,
+    "power": currentMilliWatts,
+    "onForTime": lastOnSeconds,
+    "onForToday": onTodaySeconds,
+    "onForTotal": onForTotalSeconds,
+    "powerToday": num.parse(c[8]),
+    "powerTotal": num.parse(c[9]),
+    "lastChange": lastChange.toIso8601String()
+  };
 }
 
 class GetBinaryStateNode extends SimpleNode {
@@ -466,6 +593,7 @@ class SetBinaryStateNode extends SimpleNode {
 
 Map<String, Service> basicEventServices = {};
 Map<String, Service> deviceEventServices = {};
+Map<String, Service> insightServices = {};
 
 class CoffeeMakerHelper {
   static String getModeString(mode) {
