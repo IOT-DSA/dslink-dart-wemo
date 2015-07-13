@@ -477,8 +477,15 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
 Duration deviceDiscoveryTickRate;
 Duration valueUpdateTickRate;
 
+bool isDiscovering = false;
+
 tickDeviceDiscovery() async {
+  if (isDiscovering) {
+    return;
+  }
+  isDiscovering = true;
   await updateDevices();
+  isDiscovering = false;
 }
 
 List<String> ticking = [];
@@ -490,8 +497,11 @@ tickValueUpdates() async {
     }
 
     new Future(() async {
-      SimpleNode node = link[path];
+      if (ticking.contains(path)) {
+        return;
+      }
 
+      SimpleNode node = link[path];
       ticking.add(path);
 
       if (!node.children.values.any((SimpleNode x) => x.hasSubscriber) && !(link.val("${path}/BinaryState") == null)) {
