@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:io";
 
 import "package:dslink/dslink.dart";
 import "package:dslink/nodes.dart";
@@ -167,15 +168,7 @@ main(List<String> args) async {
       continue;
     }
 
-    try {
-      var dm = new DiscoveredClient();
-      dm.location = nr.configs[r"$location"];
-
-      var device = await dm.getDevice();
-      await addDevice(device, true, true);
-    } catch (e) {
-      print("Failed to load device: ${n}");
-    }
+    attemptInitialConnect(n);
   }
 
   await updateDevices();
@@ -183,6 +176,31 @@ main(List<String> args) async {
   link.syncValue("/Value_Tick_Rate");
   link.syncValue("/Discovery_Tick_Rate");
   link.connect();
+}
+
+attemptInitialConnect(String n) async {
+  SimpleNode nr = link["/${n}"];
+
+  try {
+    var devices = await new DeviceDiscoverer().getDevices();
+    var device = devices.firstWhere((x) => x.uuid == n, orElse: () => null);
+
+    if (device == null) {
+      var dm = new DiscoveredClient();
+      dm.location = nr.configs[r"$location"];
+    }
+
+    await addDevice(device, true, true);
+
+    print("Connected to ${n}");
+  } catch (e) {
+    print("Failed to load device: ${n}");
+    new Timer(new Duration(seconds: 5), () async {
+      if (nr.configs[r"$uuid"] != null) {
+        await attemptInitialConnect(n);
+      }
+    });
+  }
 }
 
 Timer valueUpdateTimer;
@@ -207,8 +225,6 @@ updateDevices() async {
     if (devices.any((it) => it.uuid == c)) {
       continue;
     }
-
-    devicesNode.removeChild(c);
   }
 
   for (Device device in devices) {
@@ -224,7 +240,44 @@ updateDevices() async {
   }
 }
 
+tryToFix(String uuid, String udn) async {
+  print("Attempting Reconnection to ${uuid}");
+  try {
+    var devices = await new DeviceDiscoverer().getDevices(type: uuid).timeout(new Duration(seconds: 10), onTimeout: () => []);
+    var device = devices.firstWhere((x) => x.uuid == uuid, orElse: () => null);
+
+    if (device == null) {
+      print("Reconnection Failed for ${uuid}");
+      return false;
+    }
+
+    var p = "/${uuid}";
+    var services = [basicEventServices[p], deviceEventServices[p], insightServices[p]];
+    services.removeWhere((x) => x == null);
+    var uri = Uri.parse(service.controlUrl);
+    var base = Uri.parse(device.urlBase);
+
+    link[p].configs[r"$location"] = base.toString();
+    await link.saveAsync();
+
+    uri = uri.replace(host: base.host, port: base.port);
+
+    for (Service service in services) {
+      service.controlUrl = uri.toString();
+    }
+  } catch (e) {
+    print("Reconnection Failed for ${uuid}: ${e}");
+    return false;
+  }
+
+  print("Reconnected to ${uuid}");
+
+  return true;
+}
+
 addDevice(Device device, [bool manual = false, bool force = false]) async {
+  print("Added Device ${device.uuid}");
+
   if (
     (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
     link["/${device.uuid}"].configs.containsKey(r"$location") && !force) {
@@ -236,6 +289,7 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
   var m = {
     r"$name": device.friendlyName,
     r"$uuid": device.uuid,
+    r"$udn": device.udn,
     r"$location": uri
   };
 
@@ -427,74 +481,99 @@ tickDeviceDiscovery() async {
   await updateDevices();
 }
 
+List<String> ticking = [];
+
 tickValueUpdates() async {
   for (var path in basicEventServices.keys) {
-    SimpleNode node = link[path];
-
-    if (!node.children.values.any((SimpleNode x) => x.hasSubscriber) && !(link.val("${path}/BinaryState") == null)) {
+    if (ticking.contains(path)) {
       return;
     }
 
-    var service = basicEventServices[path];
-    var result;
-    try  {
-      result = await service.invokeAction("GetBinaryState", {});
-    } catch (e) {
-      continue;
-    }
+    new Future(() async {
+      SimpleNode node = link[path];
 
-    var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
-    var state = int.parse(result["BinaryState"]);
+      ticking.add(path);
 
-    link.val("${path}/Friendly_Name", friendlyName);
-    link.val("${path}/BinaryState", state);
+      if (!node.children.values.any((SimpleNode x) => x.hasSubscriber) && !(link.val("${path}/BinaryState") == null)) {
+        ticking.remove(path);
+        return;
+      }
 
-    var deviceEventService = deviceEventServices[path];
-
-    if (node.getConfig(r"$isCoffeeMaker") == true) {
-      var mr;
-      try {
-        mr = await deviceEventService.invokeAction("GetAttributes", {});
+      var service = basicEventServices[path];
+      var result;
+      try  {
+        result = await service.invokeAction("GetBinaryState", {}).timeout(new Duration(seconds: 5));
       } catch (e) {
-        continue;
-      }
-      var attrs = WemoHelper.parseAttributes(mr["attributeList"]);
-      var mode = CoffeeMakerHelper.getModeString(attrs["Mode"]);
-      var brewTimestamp = attrs["Brewed"];
-      var brewingTimestamp = attrs["Brewing"];
-
-      if (brewingTimestamp == null) brewingTimestamp = 0;
-      if (brewTimestamp == null) brewTimestamp = 0;
-
-      DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
-      DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
-      link.val("${path}/Mode", mode);
-      link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
-      link.val("${path}/Brew_Started", brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
-      link.val("${path}/Brew_Duration", lastBrewed.difference(lastBrewStarted).inSeconds);
-      var age = 0;
-      if (brewTimestamp != 0) {
-        age = lastBrewed.difference(new DateTime.now()).inSeconds;
-      }
-      link.val("${path}/Brew_Age", age);
-    } else if (node.getConfig(r"$isInsightSwitch") == true) {
-      var insight = insightServices[path];
-      if (insight == null) {
-        continue;
+        if (e is SocketException || e is TimeoutException) {
+          var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
+          if (!m) {
+            ticking.remove(path);
+            return;
+          }
+        } else {
+          ticking.remove(path);
+          return;
+        }
+        result = await service.invokeAction("GetBinaryState", {});
       }
 
-      try {
-        var data = await fetchInsightData(insight);
-        link.val("${path}/State", data["state"]);
-        link.val("${path}/Last_State_Change", data["lastChange"]);
-        link.val("${path}/Current_Power", data["power"]);
-        link.val("${path}/On_For_Time", data["onForTime"]);
-        link.val("${path}/On_For_Today", data["onForToday"]);
-        link.val("${path}/On_For_Total", data["onForTotal"]);
-        link.val("${path}/Today_Power", data["powerToday"]);
-        link.val("${path}/Total_Power", data["powerTotal"]);
-      } catch (e) {}
-    }
+      var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
+      var state = int.parse(result["BinaryState"]);
+
+      link.val("${path}/Friendly_Name", friendlyName);
+      link.val("${path}/BinaryState", state);
+
+      var deviceEventService = deviceEventServices[path];
+
+      if (node.getConfig(r"$isCoffeeMaker") == true) {
+        var mr;
+        try {
+          mr = await deviceEventService.invokeAction("GetAttributes", {});
+        } catch (e) {
+          ticking.remove(path);
+          return;
+        }
+        var attrs = WemoHelper.parseAttributes(mr["attributeList"]);
+        var mode = CoffeeMakerHelper.getModeString(attrs["Mode"]);
+        var brewTimestamp = attrs["Brewed"];
+        var brewingTimestamp = attrs["Brewing"];
+
+        if (brewingTimestamp == null) brewingTimestamp = 0;
+        if (brewTimestamp == null) brewTimestamp = 0;
+
+        DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
+        DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
+        link.val("${path}/Mode", mode);
+        link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
+        link.val("${path}/Brew_Started", brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
+        link.val("${path}/Brew_Duration", lastBrewed.difference(lastBrewStarted).inSeconds);
+        var age = 0;
+        if (brewTimestamp != 0) {
+          age = lastBrewed.difference(new DateTime.now()).inSeconds;
+        }
+        link.val("${path}/Brew_Age", age);
+      } else if (node.getConfig(r"$isInsightSwitch") == true) {
+        var insight = insightServices[path];
+        if (insight == null) {
+          ticking.remove(path);
+          return;
+        }
+
+        try {
+          var data = await fetchInsightData(insight);
+          link.val("${path}/State", data["state"]);
+          link.val("${path}/Last_State_Change", data["lastChange"]);
+          link.val("${path}/Current_Power", data["power"]);
+          link.val("${path}/On_For_Time", data["onForTime"]);
+          link.val("${path}/On_For_Today", data["onForToday"]);
+          link.val("${path}/On_For_Total", data["onForTotal"]);
+          link.val("${path}/Today_Power", data["powerToday"]);
+          link.val("${path}/Total_Power", data["powerTotal"]);
+        } catch (e) {}
+      }
+
+      ticking.remove(path);
+    });
   }
 }
 
