@@ -530,6 +530,8 @@ tickValueUpdates() async {
       var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
       var state = int.parse(result["BinaryState"]);
 
+      node.configs[r"$name"] = friendlyName;
+      node.updateList(r"$name");
       link.val("${path}/Friendly_Name", friendlyName);
       link.val("${path}/BinaryState", state);
 
