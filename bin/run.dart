@@ -171,7 +171,7 @@ main(List<String> args) async {
     attemptInitialConnect(n);
   }
 
-  await updateDevices();
+  updateDevices();
 
   link.syncValue("/Value_Tick_Rate");
   link.syncValue("/Discovery_Tick_Rate");
