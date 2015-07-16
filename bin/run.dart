@@ -527,12 +527,15 @@ tickValueUpdates() async {
         result = await service.invokeAction("GetBinaryState", {});
       }
 
-      var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
-      var state = int.parse(result["BinaryState"]);
+      try {
+        var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
+        node.configs[r"$name"] = friendlyName;
+        node.updateList(r"$name");
+        link.val("${path}/Friendly_Name", friendlyName);
+      } catch (e) {
+      }
 
-      node.configs[r"$name"] = friendlyName;
-      node.updateList(r"$name");
-      link.val("${path}/Friendly_Name", friendlyName);
+      var state = int.parse(result["BinaryState"]);
       link.val("${path}/BinaryState", state);
 
       var deviceEventService = deviceEventServices[path];
