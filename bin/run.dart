@@ -254,15 +254,14 @@ tryToFix(String uuid, String udn) async {
     var p = "/${uuid}";
     var services = [basicEventServices[p], deviceEventServices[p], insightServices[p]];
     services.removeWhere((x) => x == null);
-    var uri = Uri.parse(service.controlUrl);
     var base = Uri.parse(device.urlBase);
 
     link[p].configs[r"$location"] = base.toString();
     await link.saveAsync();
 
-    uri = uri.replace(host: base.host, port: base.port);
-
     for (Service service in services) {
+      var uri = Uri.parse(service.controlUrl);
+      uri = uri.replace(host: base.host, port: base.port);
       service.controlUrl = uri.toString();
     }
   } catch (e) {
@@ -630,7 +629,7 @@ class GetBinaryStateNode extends SimpleNode {
     try {
       result = await basicEventServices[p].invokeAction("GetBinaryState", {});
     } catch (e) {
-      return;
+      return {};
     }
     var state = int.parse(result["BinaryState"]);
     link.val("${p}/BinaryState", state);
