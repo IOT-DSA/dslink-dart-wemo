@@ -195,7 +195,7 @@ attemptInitialConnect(String n) async {
     print("Connected to ${n}");
   } catch (e) {
     print("Failed to load device: ${n}");
-    new Timer(new Duration(seconds: 5), () async {
+    new Timer(const Duration(seconds: 5), () async {
       if (nr.configs[r"$uuid"] != null) {
         await attemptInitialConnect(n);
       }
@@ -243,7 +243,7 @@ updateDevices() async {
 tryToFix(String uuid, String udn) async {
   print("Attempting Reconnection to ${uuid}");
   try {
-    var devices = await new DeviceDiscoverer().getDevices(type: uuid).timeout(new Duration(seconds: 10), onTimeout: () => []);
+    var devices = await new DeviceDiscoverer().getDevices(type: uuid).timeout(const Duration(seconds: 10), onTimeout: () => []);
     var device = devices.firstWhere((x) => x.uuid == uuid, orElse: () => null);
 
     if (device == null) {
@@ -511,7 +511,7 @@ tickValueUpdates() async {
       var service = basicEventServices[path];
       var result;
       try  {
-        result = await service.invokeAction("GetBinaryState", {}).timeout(new Duration(seconds: 5));
+        result = await service.invokeAction("GetBinaryState", {}).timeout(const Duration(seconds: 5));
       } catch (e) {
         if (e is SocketException || e is TimeoutException) {
           var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
