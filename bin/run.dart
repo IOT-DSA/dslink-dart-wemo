@@ -528,8 +528,6 @@ tickValueUpdates() async {
 
       try {
         var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
-        node.configs[r"$name"] = friendlyName;
-        node.updateList(r"$name");
         link.val("${path}/Friendly_Name", friendlyName);
       } catch (e) {
       }
