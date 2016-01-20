@@ -214,7 +214,7 @@ updateDevices() async {
   List<Device> devices;
 
   try {
-    devices = await discoverer.getDevices(timeout: const Duration(seconds: 5));
+    devices = await discoverer.getDevices(timeout: const Duration(seconds: 20));
     devices = devices.where((x) => x.services.any((s) => s.type == "urn:Belkin:service:basicevent:1")).toList();
   } catch (e) {
     return;
