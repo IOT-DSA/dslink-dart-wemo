@@ -240,6 +240,7 @@ updateDevices() async {
   for (Device device in devices) {
     if (
       (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
+      link["/${device.uuid}"] != null &&
       link["/${device.uuid}"].configs.containsKey(r"$location")) {
       continue;
     }
