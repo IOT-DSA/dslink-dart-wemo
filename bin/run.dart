@@ -52,7 +52,13 @@ main(List<String> args) async {
         "error": ""
       };
     }),
-    "remove": (String path) => new DeleteActionNode.forParent(path, link.provider)
+    "remove": (String path) => new DeleteActionNode.forParent(
+      path,
+      link.provider as MutableNodeProvider,
+      onDelete: () {
+        link.save();
+      }
+    )
   }, autoInitialize: false);
 
   link.init();
@@ -215,7 +221,11 @@ updateDevices() async {
 
   try {
     devices = await discoverer.getDevices(timeout: const Duration(seconds: 20));
-    devices = devices.where((x) => x.services.any((s) => s.type == "urn:Belkin:service:basicevent:1")).toList();
+    devices = devices.where((x) =>
+      x.services.any(
+        (s) => s.type == "urn:Belkin:service:basicevent:1"
+      )
+    ).toList();
   } catch (e) {
     return;
   }
@@ -243,7 +253,10 @@ updateDevices() async {
 tryToFix(String uuid, String udn) async {
   print("Attempting Reconnection to ${uuid}");
   try {
-    var devices = await new DeviceDiscoverer().getDevices(type: uuid).timeout(const Duration(seconds: 10), onTimeout: () => []);
+    var devices = await new DeviceDiscoverer().getDevices(
+      type: uuid
+    ).timeout(const Duration(seconds: 10), onTimeout: () => []);
+
     var device = devices.firstWhere((x) => x.uuid == uuid, orElse: () => null);
 
     if (device == null) {
@@ -252,7 +265,11 @@ tryToFix(String uuid, String udn) async {
     }
 
     var p = "/${uuid}";
-    var services = [basicEventServices[p], deviceEventServices[p], insightServices[p]];
+    var services = [
+      basicEventServices[p],
+      deviceEventServices[p],
+      insightServices[p]
+    ];
     services.removeWhere((x) => x == null);
     var base = Uri.parse(device.urlBase);
 
@@ -292,16 +309,22 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
     r"$location": uri
   };
 
-  var basicEventService = await device.getService("urn:Belkin:service:basicevent:1");
+  var basicEventService = await device.getService(
+    "urn:Belkin:service:basicevent:1"
+  );
 
   try {
-    var deviceEventService = await device.getService("urn:Belkin:service:deviceevent:1");
+    var deviceEventService = await device.getService(
+      "urn:Belkin:service:deviceevent:1"
+    );
     deviceEventServices["/${device.uuid}"] = deviceEventService;
   } catch (e) {
   }
 
   try {
-    var insightDeviceService = await device.getService("urn:Belkin:service:insight:1");
+    var insightDeviceService = await device.getService(
+      "urn:Belkin:service:insight:1"
+    );
     insightServices["/${device.uuid}"] = insightDeviceService;
   } catch (e) {
   }
@@ -503,7 +526,9 @@ tickValueUpdates() async {
       SimpleNode node = link[path];
       ticking.add(path);
 
-      if (!node.children.values.any((SimpleNode x) => x.hasSubscriber) && !(link.val("${path}/BinaryState") == null)) {
+      if (
+        !node.children.values.any((SimpleNode x) => x.hasSubscriber) &&
+        !(link.val("${path}/BinaryState") == null)) {
         ticking.remove(path);
         return;
       }
@@ -511,7 +536,9 @@ tickValueUpdates() async {
       var service = basicEventServices[path];
       var result;
       try  {
-        result = await service.invokeAction("GetBinaryState", {}).timeout(const Duration(seconds: 5));
+        result = await service
+          .invokeAction("GetBinaryState", {})
+          .timeout(const Duration(seconds: 5));
       } catch (e) {
         if (e is SocketException || e is TimeoutException) {
           var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
@@ -553,12 +580,23 @@ tickValueUpdates() async {
         if (brewingTimestamp == null) brewingTimestamp = 0;
         if (brewTimestamp == null) brewTimestamp = 0;
 
-        DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(brewTimestamp * 1000);
-        DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(brewingTimestamp * 1000);
+        DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(
+          brewTimestamp * 1000
+        );
+
+        DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(
+          brewingTimestamp * 1000
+        );
         link.val("${path}/Mode", mode);
         link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
-        link.val("${path}/Brew_Started", brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString());
-        link.val("${path}/Brew_Duration", lastBrewed.difference(lastBrewStarted).inSeconds);
+        link.val(
+          "${path}/Brew_Started",
+          brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString()
+        );
+        link.val(
+          "${path}/Brew_Duration",
+          lastBrewed.difference(lastBrewStarted).inSeconds
+        );
         var age = 0;
         if (brewTimestamp != 0) {
           age = lastBrewed.difference(new DateTime.now()).inSeconds;
@@ -599,7 +637,9 @@ Future<Map<String, dynamic>> fetchInsightData(Service service) async {
     "8": "Standby"
   }[c[0]];
 
-  var lastChange = new DateTime.fromMillisecondsSinceEpoch(num.parse(c[1]).toInt() * 1000);
+  var lastChange = new DateTime.fromMillisecondsSinceEpoch(
+    num.parse(c[1]).toInt() * 1000
+  );
   var lastOnSeconds = int.parse(c[2]);
   var onTodaySeconds = int.parse(c[3]);
   var onForTotalSeconds = int.parse(c[4]);
@@ -642,10 +682,10 @@ class ToggleBinaryStateNode extends SimpleNode {
   ToggleBinaryStateNode(String path) : super(path, link.provider);
 
   @override
-  onInvoke(Map params) {
+  onInvoke(Map params) async {
     var p = path.split("/").take(2).join("/");
     var service = basicEventServices[p];
-    service.invokeAction("GetBinaryState", {}).then((result) {
+    await service.invokeAction("GetBinaryState", {}).then((result) {
       var state = int.parse(result["BinaryState"]);
       return service.invokeAction("SetBinaryState", {
         "BinaryState": state == 0 ? 1 : 0
@@ -691,7 +731,9 @@ class SetBinaryStateNode extends SimpleNode {
       return {};
     }
 
-    var state = params["state"] is String ? int.parse(params["state"]) : params["state"];
+    var state = params["state"] is String ?
+      int.parse(params["state"]) :
+      params["state"];
 
     state = state.toInt();
 
