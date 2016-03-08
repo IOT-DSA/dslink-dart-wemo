@@ -302,12 +302,6 @@ tryToFix(String uuid, String udn) async {
 addDevice(Device device, [bool manual = false, bool force = false]) async {
   print("Added Device ${device.uuid}");
 
-  if (
-    (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
-    link["/${device.uuid}"].configs.containsKey(r"$location") && !force) {
-    throw "Device already added.";
-  }
-
   var uri = device.url;
 
   var m = {
