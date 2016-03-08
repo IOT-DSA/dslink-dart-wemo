@@ -3,6 +3,7 @@ import "dart:io";
 
 import "package:dslink/dslink.dart";
 import "package:dslink/nodes.dart";
+import "package:dslink/utils.dart";
 
 import "package:upnp/upnp.dart";
 
@@ -156,11 +157,11 @@ main(List<String> args) async {
     deviceDiscoveryTickRate = new Duration(seconds: value);
 
     if (discoveryTimer != null) {
-      discoveryTimer.cancel();
+      discoveryTimer.dispose();
       discoveryTimer = null;
     }
 
-    discoveryTimer = new Timer.periodic(deviceDiscoveryTickRate, (timer) async {
+    discoveryTimer = Scheduler.safeEvery(deviceDiscoveryTickRate, () async {
       await tickDeviceDiscovery();
     });
 
@@ -188,7 +189,9 @@ attemptInitialConnect(String n) async {
   SimpleNode nr = link["/${n}"];
 
   try {
-    var devices = await new DeviceDiscoverer().getDevices();
+    var devices = await new DeviceDiscoverer().getDevices(
+      timeout: const Duration(seconds: 20)
+    );
     var device = devices.firstWhere((x) => x.uuid == n, orElse: () => null);
 
     if (device == null) {
@@ -210,7 +213,7 @@ attemptInitialConnect(String n) async {
 }
 
 Timer valueUpdateTimer;
-Timer discoveryTimer;
+Disposable discoveryTimer;
 
 updateDevices() async {
   if (link.val("/Auto_Discovery") != true) {
@@ -220,13 +223,17 @@ updateDevices() async {
   List<Device> devices;
 
   try {
-    devices = await discoverer.getDevices(timeout: const Duration(seconds: 20));
+    devices = await discoverer.getDevices(
+      timeout: const Duration(seconds: 20)
+    );
+
     devices = devices.where((x) =>
       x.services.any(
         (s) => s.type == "urn:Belkin:service:basicevent:1"
       )
     ).toList();
-  } catch (e) {
+  } catch (e, stack) {
+    logger.warning("Failed to discover devices", e, stack);
     return;
   }
 
