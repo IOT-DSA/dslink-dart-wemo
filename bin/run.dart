@@ -338,13 +338,11 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
     r"$type": "string"
   };
 
-  if (manual) {
-    m["Remove"] = {
-      r"$invokable": "write",
-      r"$is": "remove",
-      r"$result": "values"
-    };
-  }
+  m["Remove"] = {
+    r"$invokable": "write",
+    r"$is": "remove",
+    r"$result": "values"
+  };
 
   m["BinaryState"] = {
     r"$type": "int",
@@ -494,8 +492,7 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
     m[r"$isCoffeeMaker"] = false;
   }
   link.addNode("/${device.uuid}", m);
-  SimpleNode n = link["/${device.uuid}"];
-  n.serializable = manual;
+  link.save();
 }
 
 Duration deviceDiscoveryTickRate;
