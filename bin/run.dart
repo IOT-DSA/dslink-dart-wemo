@@ -115,7 +115,7 @@ main(List<String> args) async {
   };
 
   for (var n in m.keys) {
-    if (!(link.provider as NodeProviderImpl).nodes.containsKey("/${n}")) {
+    if (!(link.provider as SimpleNodeProvider).hasNode("/${n}")) {
       link.addNode("/${n}", m[n]);
     }
   }
@@ -491,7 +491,18 @@ addDevice(Device device, [bool manual = false, bool force = false]) async {
   } else {
     m[r"$isCoffeeMaker"] = false;
   }
+
+  SimpleNodeProvider provider = link.provider;
+
+  if (provider.hasNode("/${device.uuid}")) {
+    SimpleNode node = provider.getNode("/${device.uuid}");
+    var old = node.save();
+    old.addAll(m);
+    m = old;
+  }
+
   link.addNode("/${device.uuid}", m);
+
   link.save();
 }
 
