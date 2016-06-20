@@ -99,7 +99,7 @@ main(List<String> args) async {
           "type": "bool"
         },
         {
-          "name": "error",
+          "name": "errorMessage",
           "type": "string"
         },
         {
