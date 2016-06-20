@@ -530,6 +530,11 @@ tickValueUpdates() async {
       }
 
       SimpleNode node = link[path];
+
+      if (node == null) {
+        return;
+      }
+
       ticking.add(path);
 
       if (
