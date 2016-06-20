@@ -21,7 +21,7 @@ main(List<String> args) async {
       var ip = params["ip"];
 
       if (ip == null || ip is! String) {
-        return [[false, "Bad IP"]];
+        throw new Exception("Bad IP.");
       }
 
       var port = params["port"];
@@ -40,9 +40,9 @@ main(List<String> args) async {
         await addDevice(device, true, true);
         await link.saveAsync();
 
-        return [[true, "", device.uuid.toString()]];
+        return [[true, device.uuid.toString()]];
       } catch (e) {
-        return [[false, e.toString(), null]];
+        rethrow;
       }
     }),
     "remove": (String path) => new DeleteActionNode.forParent(
@@ -97,10 +97,6 @@ main(List<String> args) async {
         {
           "name": "success",
           "type": "bool"
-        },
-        {
-          "name": "errorMessage",
-          "type": "string"
         },
         {
           "name": "deviceId",
