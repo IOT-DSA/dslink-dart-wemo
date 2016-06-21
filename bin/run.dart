@@ -26,7 +26,6 @@ main(List<String> args) async {
 
       var port = params["port"];
 
-
       try {
         if (port is String) {
           port = int.parse(port);
@@ -37,7 +36,11 @@ main(List<String> args) async {
 
         var device = await dm.getDevice();
 
-        await addDevice(device, true, true);
+        if (device != null && devicesNode.children.containsKey(device.uuid)) {
+          throw new Exception("Device already exists.");
+        }
+
+        await addDevice(device, true);
         await link.saveAsync();
 
         return [[true, device.uuid.toString()]];
@@ -89,7 +92,7 @@ main(List<String> args) async {
         },
         {
           "name": "port",
-          "type": "int",
+          "type": "number",
           "default": 49154
         }
       ],
@@ -191,7 +194,7 @@ attemptInitialConnect(String n) async {
       dm.location = nr.configs[r"$location"];
     }
 
-    await addDevice(device, true, true);
+    await addDevice(device, true);
 
     print("Connected to ${n}");
   } catch (e) {
@@ -291,7 +294,7 @@ tryToFix(String uuid, String udn) async {
   return true;
 }
 
-addDevice(Device device, [bool manual = false, bool force = false]) async {
+addDevice(Device device, [bool manual = false]) async {
   print("Added Device ${device.uuid}");
 
   var uri = device.url;
