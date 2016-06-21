@@ -57,7 +57,10 @@ main(List<String> args) async {
       if (timer != null) {
         timer.dispose();
       }
-      link.save();
+
+      new Future(() {
+        link.save();
+      });
     })
   }, autoInitialize: false);
 
@@ -513,7 +516,6 @@ addDevice(Device device, [bool manual = false]) async {
     m = old;
   }
 
-  link.removeNode("/${device.uuid}");
   link.addNode("/${device.uuid}", m);
 
   updateTimers["/${device.uuid}"] = Scheduler.safeEvery(valueUpdateTickRate, () async {
@@ -550,12 +552,6 @@ _tickValueUpdateForDevice(String path) async {
     return;
   }
 
-  if (
-  !node.children.values.any((SimpleNode x) => x.hasSubscriber) &&
-    !(link.val("${path}/BinaryState") == null)) {
-    return;
-  }
-
   var service = basicEventServices[path];
   var result;
   try  {
@@ -571,7 +567,9 @@ _tickValueUpdateForDevice(String path) async {
     } else {
       return;
     }
-    result = await service.invokeAction("GetBinaryState", {});
+    result = await service
+      .invokeAction("GetBinaryState", {})
+      .timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
 
   var state = int.parse(result["BinaryState"]);
