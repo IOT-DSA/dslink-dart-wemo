@@ -31,6 +31,8 @@ main(List<String> args) async {
           port = int.parse(port);
         }
 
+        port = port.toInt();
+
         var dm = new DiscoveredClient();
         dm.location = "http://${ip}:${port}/setup.xml";
 
@@ -48,13 +50,15 @@ main(List<String> args) async {
         rethrow;
       }
     }),
-    "remove": (String path) => new DeleteActionNode.forParent(
-      path,
-      link.provider as MutableNodeProvider,
-      onDelete: () {
-        link.save();
-      }
-    )
+    "remove": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) {
+      var p = new Path(path).parent;
+      link.removeNode(p.path);
+      print(basicEventServices);
+      basicEventServices.remove(p.path);
+      insightServices.remove(p.path);
+      deviceEventServices.remove(p.path);
+      print(basicEventServices);
+    })
   }, autoInitialize: false);
 
   link.init();
@@ -340,7 +344,7 @@ addDevice(Device device, [bool manual = false]) async {
   };
 
   m["BinaryState"] = {
-    r"$type": "int",
+    r"$type": "number",
     r"$name": "Binary State"
   };
 
@@ -362,7 +366,7 @@ addDevice(Device device, [bool manual = false]) async {
     r"$columns": [
       {
         "name": "state",
-        "type": "int"
+        "type": "number"
       }
     ]
   };
@@ -374,7 +378,7 @@ addDevice(Device device, [bool manual = false]) async {
     r"$params": [
       {
         "name": "state",
-        "type": "int"
+        "type": "number"
       }
     ],
     r"$columns": {}
@@ -474,13 +478,13 @@ addDevice(Device device, [bool manual = false]) async {
 
     m["Brew_Duration"] = {
       r"$name": "Brew Duration",
-      r"$type": "int",
+      r"$type": "number",
       "?value": -1
     };
 
     m["Brew_Age"] = {
       r"$name": "Brew Age",
-      r"$type": "int",
+      r"$type": "number",
       "?value": -1
     };
   } else {
