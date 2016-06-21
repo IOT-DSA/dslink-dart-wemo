@@ -24,15 +24,11 @@ main(List<String> args) async {
         throw new Exception("Bad IP.");
       }
 
-      var port = params["port"];
+      var port = num.parse(params["port"].toString(), (s) {
+        throw new Exception("Failed to parse port: ${s}");
+      }).toInt();
 
       try {
-        if (port is String) {
-          port = int.parse(port);
-        }
-
-        port = port.toInt();
-
         var dm = new DiscoveredClient();
         dm.location = "http://${ip}:${port}/setup.xml";
 
@@ -53,11 +49,15 @@ main(List<String> args) async {
     "remove": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) {
       var p = new Path(path).parent;
       link.removeNode(p.path);
-      print(basicEventServices);
       basicEventServices.remove(p.path);
       insightServices.remove(p.path);
       deviceEventServices.remove(p.path);
-      print(basicEventServices);
+
+      var timer = updateTimers.remove(p.path);
+      if (timer != null) {
+        timer.dispose();
+      }
+      link.save();
     })
   }, autoInitialize: false);
 
@@ -67,7 +67,7 @@ main(List<String> args) async {
     "Auto_Discovery": {
       r"$name": "Auto Discovery",
       r"$type": "bool[disabled,enabled]",
-      "?value": true,
+      "?value": false,
       r"$writable": "write"
     },
     "Value_Tick_Rate": {
@@ -134,15 +134,18 @@ main(List<String> args) async {
 
     valueUpdateTickRate = new Duration(seconds: value);
 
-    if (valueUpdateTimer != null) {
-      valueUpdateTimer.cancel();
-      valueUpdateTimer = null;
+    var deviceNames = updateTimers.keys.toList();
+
+    for (String deviceName in deviceNames) {
+      var timer = updateTimers.remove(deviceName);
+      if (timer != null) {
+        timer.dispose();
+      }
+
+      updateTimers[deviceName] = Scheduler.safeEvery(valueUpdateTickRate, () async {
+        await tickValueUpdateForDevice(deviceName);
+      });
     }
-
-    valueUpdateTimer = new Timer.periodic(valueUpdateTickRate, (timer) async {
-      await tickValueUpdates();
-    });
-
     await link.saveAsync();
   });
 
@@ -167,6 +170,9 @@ main(List<String> args) async {
     await link.saveAsync();
   });
 
+  link.syncValue("/Value_Tick_Rate");
+
+  var futures = [];
   for (var n in link["/"].children.keys) {
     SimpleNode nr = link["/${n}"];
 
@@ -174,28 +180,35 @@ main(List<String> args) async {
       continue;
     }
 
-    attemptInitialConnect(n);
+    futures.add(attemptInitialConnect(n));
   }
+
+  await Future.wait(futures);
 
   updateDevices();
 
-  link.syncValue("/Value_Tick_Rate");
   link.syncValue("/Discovery_Tick_Rate");
   link.connect();
 }
 
 attemptInitialConnect(String n) async {
+  print("Attempting initial connection to ${n}");
   SimpleNode nr = link["/${n}"];
+
+  if (nr == null) {
+    return;
+  }
 
   try {
     var devices = await new DeviceDiscoverer().getDevices(
-      timeout: const Duration(seconds: 20)
+      timeout: const Duration(seconds: 5)
     );
     var device = devices.firstWhere((x) => x.uuid == n, orElse: () => null);
 
     if (device == null) {
       var dm = new DiscoveredClient();
       dm.location = nr.configs[r"$location"];
+      device = await dm.getDevice();
     }
 
     await addDevice(device, true);
@@ -204,14 +217,14 @@ attemptInitialConnect(String n) async {
   } catch (e) {
     print("Failed to load device: ${n}");
     new Timer(const Duration(seconds: 5), () async {
-      if (nr.configs[r"$uuid"] != null) {
+      if (nr.configs[r"$uuid"] == null) {
         await attemptInitialConnect(n);
       }
     });
   }
 }
 
-Timer valueUpdateTimer;
+Disposable valueUpdateTimer;
 Disposable discoveryTimer;
 
 updateDevices() async {
@@ -493,16 +506,19 @@ addDevice(Device device, [bool manual = false]) async {
 
   SimpleNodeProvider provider = link.provider;
 
-  if (provider.hasNode("/${device.uuid}")) {
+  if (provider.hasNode("/${device.uuid}") && provider.hasNode("/${device.uuid}/BinaryState")) {
     SimpleNode node = provider.getNode("/${device.uuid}");
     var old = node.save();
     old.addAll(m);
     m = old;
   }
 
+  link.removeNode("/${device.uuid}");
   link.addNode("/${device.uuid}", m);
 
-  link.save();
+  updateTimers["/${device.uuid}"] = Scheduler.safeEvery(valueUpdateTickRate, () async {
+    await tickValueUpdateForDevice("/${device.uuid}");
+  });
 }
 
 Duration deviceDiscoveryTickRate;
@@ -519,125 +535,113 @@ tickDeviceDiscovery() async {
   isDiscovering = false;
 }
 
-List<String> ticking = [];
+tickValueUpdateForDevice(String path) async {
+  try {
+    await _tickValueUpdateForDevice(path);
+  } catch (e, stack) {
+    logger.fine("Failed to update WeMo device values for ${path}", e, stack);
+  }
+}
 
-tickValueUpdates() async {
-  for (var path in basicEventServices.keys) {
-    if (ticking.contains(path)) {
+_tickValueUpdateForDevice(String path) async {
+  SimpleNode node = link[path];
+
+  if (node == null) {
+    return;
+  }
+
+  if (
+  !node.children.values.any((SimpleNode x) => x.hasSubscriber) &&
+    !(link.val("${path}/BinaryState") == null)) {
+    return;
+  }
+
+  var service = basicEventServices[path];
+  var result;
+  try  {
+    result = await service
+      .invokeAction("GetBinaryState", {})
+      .timeout(const Duration(seconds: 5));
+  } catch (e) {
+    if (e is SocketException || e is TimeoutException) {
+      var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
+      if (!m) {
+        return;
+      }
+    } else {
+      return;
+    }
+    result = await service.invokeAction("GetBinaryState", {});
+  }
+
+  var state = int.parse(result["BinaryState"]);
+  link.val("${path}/BinaryState", state);
+
+  var deviceEventService = deviceEventServices[path];
+
+  if (node.getConfig(r"$isCoffeeMaker") == true) {
+    var mr;
+    try {
+      mr = await deviceEventService.invokeAction("GetAttributes", {});
+    } catch (e) {
+      return;
+    }
+    var attrs = WemoHelper.parseAttributes(mr["attributeList"]);
+    var mode = CoffeeMakerHelper.getModeString(attrs["Mode"]);
+    var brewTimestamp = attrs["Brewed"];
+    var brewingTimestamp = attrs["Brewing"];
+
+    if (brewingTimestamp == null) brewingTimestamp = 0;
+    if (brewTimestamp == null) brewTimestamp = 0;
+
+    DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(
+      brewTimestamp * 1000
+    );
+
+    DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(
+      brewingTimestamp * 1000
+    );
+    link.val("${path}/Mode", mode);
+    link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
+    link.val(
+      "${path}/Brew_Started",
+      brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString()
+    );
+    link.val(
+      "${path}/Brew_Duration",
+      lastBrewed.difference(lastBrewStarted).inSeconds
+    );
+    var age = 0;
+    if (brewTimestamp != 0) {
+      age = lastBrewed.difference(new DateTime.now()).inSeconds;
+    }
+    link.val("${path}/Brew_Age", age);
+  } else if (node.getConfig(r"$isInsightSwitch") == true) {
+    var insight = insightServices[path];
+    if (insight == null) {
       return;
     }
 
-    new Future(() async {
-      if (ticking.contains(path)) {
-        return;
-      }
+    try {
+      var data = await fetchInsightData(insight);
+      link.val("${path}/State", data["state"]);
+      link.val("${path}/Last_State_Change", data["lastChange"]);
+      link.val("${path}/Current_Power", data["power"]);
+      link.val("${path}/On_For_Time", data["onForTime"]);
+      link.val("${path}/On_For_Today", data["onForToday"]);
+      link.val("${path}/On_For_Total", data["onForTotal"]);
+      link.val("${path}/Today_Power", data["powerToday"]);
+      link.val("${path}/Total_Power", data["powerTotal"]);
+    } catch (e) {}
+  }
 
-      SimpleNode node = link[path];
-
-      if (node == null) {
-        return;
-      }
-
-      ticking.add(path);
-
-      if (
-        !node.children.values.any((SimpleNode x) => x.hasSubscriber) &&
-        !(link.val("${path}/BinaryState") == null)) {
-        ticking.remove(path);
-        return;
-      }
-
-      var service = basicEventServices[path];
-      var result;
-      try  {
-        result = await service
-          .invokeAction("GetBinaryState", {})
-          .timeout(const Duration(seconds: 5));
-      } catch (e) {
-        if (e is SocketException || e is TimeoutException) {
-          var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
-          if (!m) {
-            ticking.remove(path);
-            return;
-          }
-        } else {
-          ticking.remove(path);
-          return;
-        }
-        result = await service.invokeAction("GetBinaryState", {});
-      }
-
-      try {
-        var friendlyName = (await service.invokeAction("GetFriendlyName", {}))["FriendlyName"];
-        link.val("${path}/Friendly_Name", friendlyName);
-      } catch (e) {
-      }
-
-      var state = int.parse(result["BinaryState"]);
-      link.val("${path}/BinaryState", state);
-
-      var deviceEventService = deviceEventServices[path];
-
-      if (node.getConfig(r"$isCoffeeMaker") == true) {
-        var mr;
-        try {
-          mr = await deviceEventService.invokeAction("GetAttributes", {});
-        } catch (e) {
-          ticking.remove(path);
-          return;
-        }
-        var attrs = WemoHelper.parseAttributes(mr["attributeList"]);
-        var mode = CoffeeMakerHelper.getModeString(attrs["Mode"]);
-        var brewTimestamp = attrs["Brewed"];
-        var brewingTimestamp = attrs["Brewing"];
-
-        if (brewingTimestamp == null) brewingTimestamp = 0;
-        if (brewTimestamp == null) brewTimestamp = 0;
-
-        DateTime lastBrewed = new DateTime.fromMillisecondsSinceEpoch(
-          brewTimestamp * 1000
-        );
-
-        DateTime lastBrewStarted = new DateTime.fromMillisecondsSinceEpoch(
-          brewingTimestamp * 1000
-        );
-        link.val("${path}/Mode", mode);
-        link.val("${path}/Brew_Completed", brewTimestamp == 0 ? "N/A" : lastBrewed.toString());
-        link.val(
-          "${path}/Brew_Started",
-          brewingTimestamp == 0 ? "N/A" : lastBrewStarted.toString()
-        );
-        link.val(
-          "${path}/Brew_Duration",
-          lastBrewed.difference(lastBrewStarted).inSeconds
-        );
-        var age = 0;
-        if (brewTimestamp != 0) {
-          age = lastBrewed.difference(new DateTime.now()).inSeconds;
-        }
-        link.val("${path}/Brew_Age", age);
-      } else if (node.getConfig(r"$isInsightSwitch") == true) {
-        var insight = insightServices[path];
-        if (insight == null) {
-          ticking.remove(path);
-          return;
-        }
-
-        try {
-          var data = await fetchInsightData(insight);
-          link.val("${path}/State", data["state"]);
-          link.val("${path}/Last_State_Change", data["lastChange"]);
-          link.val("${path}/Current_Power", data["power"]);
-          link.val("${path}/On_For_Time", data["onForTime"]);
-          link.val("${path}/On_For_Today", data["onForToday"]);
-          link.val("${path}/On_For_Total", data["onForTotal"]);
-          link.val("${path}/Today_Power", data["powerToday"]);
-          link.val("${path}/Total_Power", data["powerTotal"]);
-        } catch (e) {}
-      }
-
-      ticking.remove(path);
-    });
+  var currentFriendlyDeviceName = link.val("${path}/Friendly_Name");
+  if (currentFriendlyDeviceName == null) {
+    try {
+      var nameResult = await service.invokeAction("GetFriendlyName", {});
+      var name = nameResult["FriendlyName"].toString();
+      link.val("${path}/Friendly_Name", name);
+    } catch (e) {}
   }
 }
 
@@ -699,25 +703,14 @@ class ToggleBinaryStateNode extends SimpleNode {
   onInvoke(Map params) async {
     var p = path.split("/").take(2).join("/");
     var service = basicEventServices[p];
-    await service.invokeAction("GetBinaryState", {}).then((result) {
-      var state = int.parse(result["BinaryState"]);
-      return service.invokeAction("SetBinaryState", {
-        "BinaryState": state == 0 ? 1 : 0
-      });
-    }).then((l) {
-      var state = l["BinaryState"];
-      if (state != "Error") {
-        try {
-          state = int.parse(state);
-        } catch (e) {}
-      }
-      if (state is! int) {
-        return null;
-      }
-      link.val("${p}/BinaryState", state);
-    }).catchError((e) {
+    var result = await service.invokeAction("GetBinaryState", {});
+    var state = num.parse(result["BinaryState"].toString()).toInt();
+
+    await service.invokeAction("SetBinaryState", {
+      "BinaryState": state == 0 ? 1 : 0
     });
-    return {};
+
+    return [];
   }
 }
 
@@ -725,14 +718,13 @@ class BrewCoffeeNode extends SimpleNode {
   BrewCoffeeNode(String path) : super(path, link.provider);
 
   @override
-  onInvoke(Map params) {
+  onInvoke(Map params)  async {
     var p = path.split("/").take(2).join("/");
     var service = deviceEventServices[p];
-    service.invokeAction("SetAttributes", {
+    await service.invokeAction("SetAttributes", {
       "attributeList": CoffeeMakerHelper.createSetModeAttributes(4)
-    }).catchError((e) {
     });
-    return {};
+    return [];
   }
 }
 
@@ -742,39 +734,25 @@ class SetBinaryStateNode extends SimpleNode {
   @override
   onInvoke(Map params) async {
     if (params["state"] == null) {
-      return {};
+      return [];
     }
 
-    var state = params["state"] is String ?
-      int.parse(params["state"]) :
-      params["state"];
-
-    state = state.toInt();
+    var state = num.parse(params["state"].toString()).toInt();
 
     var p = path.split("/").take(2).join("/");
     var service = basicEventServices[p];
-    return service.invokeAction("SetBinaryState", {
+    await service.invokeAction("SetBinaryState", {
       "BinaryState": state
-    }).then((l) {
-      var state = l["BinaryState"];
-      if (state != "Error") {
-        try {
-          state = int.parse(state);
-        } catch (e) {}
-      }
-      if (state is! int) {
-        return null;
-      }
-      link.val("${p}/BinaryState", state);
-      return {};
-    }).catchError((e) {
     });
+
+    return [];
   }
 }
 
 Map<String, Service> basicEventServices = {};
 Map<String, Service> deviceEventServices = {};
 Map<String, Service> insightServices = {};
+Map<String, Disposable> updateTimers = {};
 
 class CoffeeMakerHelper {
   static String getModeString(mode) {
