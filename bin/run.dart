@@ -61,6 +61,9 @@ main(List<String> args) async {
       new Future(() {
         link.save();
       });
+    }),
+    "discoverDevices": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
+      await tickDeviceDiscovery();
     })
   }, autoInitialize: false);
 
@@ -113,6 +116,12 @@ main(List<String> args) async {
           "type": "string"
         }
       ]
+    },
+    "Discover_Devices": {
+      r"$name": "Discover Devices",
+      r"$invokable": "read",
+      r"$result": "values",
+      r"$is": "discoverDevices"
     }
   };
 
@@ -167,6 +176,9 @@ main(List<String> args) async {
     }
 
     discoveryTimer = Scheduler.safeEvery(deviceDiscoveryTickRate, () async {
+      if (link.val("/Auto_Discovery") != true) {
+        return;
+      }
       await tickDeviceDiscovery();
     });
 
@@ -231,15 +243,13 @@ Disposable valueUpdateTimer;
 Disposable discoveryTimer;
 
 updateDevices() async {
-  if (link.val("/Auto_Discovery") != true) {
-    return;
-  }
+  print("Updating Devices...");
 
   List<Device> devices;
 
   try {
     devices = await discoverer.getDevices(
-      timeout: const Duration(seconds: 20)
+      timeout: const Duration(seconds: 10)
     );
 
     devices = devices.where((x) =>
@@ -271,6 +281,8 @@ updateDevices() async {
 
     await addDevice(device);
   }
+
+  print("Devices Updated.");
 }
 
 tryToFix(String uuid, String udn) async {
@@ -530,10 +542,15 @@ bool isDiscovering = false;
 
 tickDeviceDiscovery() async {
   if (isDiscovering) {
+    print("Discovery tick made, but we are still discovering.");
     return;
   }
   isDiscovering = true;
-  await updateDevices();
+  try {
+    await updateDevices();
+  } catch (e, stack) {
+    logger.warning("Discovery error.", e, stack);
+  }
   isDiscovering = false;
 }
 
