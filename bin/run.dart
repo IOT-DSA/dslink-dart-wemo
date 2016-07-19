@@ -176,7 +176,7 @@ main(List<String> args) async {
     }
 
     discoveryTimer = Scheduler.safeEvery(deviceDiscoveryTickRate, () async {
-      if (link.val("/Auto_Discovery") != true) {
+      if (link.val("/Auto_Discovery") == false) {
         return;
       }
       await tickDeviceDiscovery();
@@ -200,7 +200,9 @@ main(List<String> args) async {
 
   await Future.wait(futures);
 
-  updateDevices();
+  if (link.val("/Auto_Discovery") != false) {
+    tickDeviceDiscovery();
+  }
 
   link.syncValue("/Discovery_Tick_Rate");
   link.connect();
@@ -245,41 +247,40 @@ Disposable discoveryTimer;
 updateDevices() async {
   print("Updating Devices...");
 
-  List<Device> devices;
-
   try {
-    devices = await discoverer.getDevices(
-      timeout: const Duration(seconds: 10)
-    );
+    await for (DiscoveredClient c in discoverer.quickDiscoverClients(
+      timeout: const Duration(seconds: 10),
+      query: "ssdp:all"
+    )) {
+      if (c.st != "urn:Belkin:device:controllee:1") {
+        logger.fine("Skip over ${c.usn} (${c.location}): Not a Belkin controller.");
+        continue;
+      }
 
-    devices = devices.where((x) =>
-      x.services.any(
-        (s) => s.type == "urn:Belkin:service:basicevent:1"
-      )
-    ).toList();
+      try {
+        var device = await c.getDevice();
+
+        if (!device.services.any((x) => x.type == "urn:Belkin:service:basicevent:1")) {
+          continue;
+        }
+
+        if ((link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
+          link["/${device.uuid}"] != null &&
+          link["/${device.uuid}"].configs.containsKey(r"$location")) {
+          continue;
+        }
+
+        print("Discovered Device: ${device.friendlyName}");
+
+        await addDevice(device);
+      } catch (e) {
+        logger.fine("Failed to add device ${c.usn} at ${c.location}", e);
+        continue;
+      }
+    }
   } catch (e, stack) {
     logger.warning("Failed to discover devices", e, stack);
     return;
-  }
-
-  // Check to see if any devices have been removed.
-  for (var c in devicesNode.children.keys.toList()) {
-    if (devices.any((it) => it.uuid == c)) {
-      continue;
-    }
-  }
-
-  for (Device device in devices) {
-    if (
-      (link.provider as NodeProviderImpl).nodes.containsKey("/${device.uuid}") &&
-      link["/${device.uuid}"] != null &&
-      link["/${device.uuid}"].configs.containsKey(r"$location")) {
-      continue;
-    }
-
-    print("Discovered Device: ${device.friendlyName}");
-
-    await addDevice(device);
   }
 
   print("Devices Updated.");
@@ -700,14 +701,12 @@ class GetBinaryStateNode extends SimpleNode {
     try {
       result = await basicEventServices[p].invokeAction("GetBinaryState", {});
     } catch (e) {
-      return {};
+      return [];
     }
     var state = int.parse(result["BinaryState"]);
     link.val("${p}/BinaryState", state);
 
-    return {
-      "state": state
-    };
+    return [[state]];
   }
 }
 
