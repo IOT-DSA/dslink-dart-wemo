@@ -250,7 +250,7 @@ updateDevices() async {
   try {
     await for (DiscoveredClient c in discoverer.quickDiscoverClients(
       timeout: const Duration(seconds: 10),
-      query: "ssdp:all"
+      query: "urn:Belkin:device:controllee:1"
     )) {
       if (c.st != "urn:Belkin:device:controllee:1") {
         logger.fine("Skip over ${c.usn} (${c.location}): Not a Belkin controller.");
@@ -286,7 +286,7 @@ updateDevices() async {
   print("Devices Updated.");
 }
 
-tryToFix(String uuid, String udn) async {
+tryToFixDevice(String uuid, String udn) async {
   print("Attempting Reconnection to ${uuid}");
   try {
     var devices = await new DeviceDiscoverer().getDevices(
@@ -578,7 +578,11 @@ _tickValueUpdateForDevice(String path) async {
       .timeout(const Duration(seconds: 5));
   } catch (e) {
     if (e is SocketException || e is TimeoutException) {
-      var m = await tryToFix(path.substring(1), link[path].configs[r"$udn"]);
+      var m = await tryToFixDevice(
+        path.substring(1),
+        link[path].configs[r"$udn"]
+      );
+
       if (!m) {
         return;
       }
