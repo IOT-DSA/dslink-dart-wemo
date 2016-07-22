@@ -5,3 +5,8 @@ dependencies:
     git: https://github.com/IOT-DSA/sdk-dslink-dart.git
   upnp:
     git: https://github.com/DirectMyFile/upnp.dart.git
+dependency_overrides:
+  convert:
+    git:
+      url: https://github.com/dart-lang/convert.git
+      ref: "92ac5f1c90e6c84aedc8549aa11c0c8cbf33fce5"
